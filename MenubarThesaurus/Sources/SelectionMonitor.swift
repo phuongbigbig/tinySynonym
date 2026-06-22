@@ -82,6 +82,8 @@ class SelectionMonitor {
     }
 
     /// Reads the selected text from the currently focused UI element.
+    /// Uses multiple strategies to handle apps like Microsoft Word that have
+    /// non-standard accessibility implementations.
     private func getSelectedText() -> String? {
         let systemWide = AXUIElementCreateSystemWide()
 
@@ -97,8 +99,7 @@ class SelectionMonitor {
             return nil
         }
 
-        // AXUIElementCopyAttributeValue returns CFTypeRef; cast safely
-        let app = focusedAppRef as! AXUIElement  // this specific attribute always returns AXUIElement
+        let app = focusedAppRef as! AXUIElement
 
         // Get the focused UI element within the app
         var focusedElemRef: AnyObject?
@@ -108,32 +109,93 @@ class SelectionMonitor {
             &focusedElemRef
         )
         guard elemResult == .success else {
-            // Not all apps expose focused element — this is normal
             lastError = nil
             return nil
         }
 
         let element = focusedElemRef as! AXUIElement
 
-        // Get selected text from the focused element
-        var selectedTextRef: AnyObject?
-        let textResult = AXUIElementCopyAttributeValue(
+        // Strategy 1: Direct kAXSelectedTextAttribute on focused element (works for most apps)
+        if let text = getAXSelectedText(from: element) {
+            return text
+        }
+
+        // Strategy 2: Try kAXSelectedTextRangeAttribute + kAXStringForRangeParameterizedAttribute
+        // This works for apps like Word that expose range-based text access
+        if let text = getSelectedTextViaRange(from: element) {
+            return text
+        }
+
+        // Strategy 3: Walk up the element hierarchy — some apps (Word, Outlook) expose
+        // selected text on a parent element rather than the deepest focused element
+        var current = element
+        for _ in 0..<4 {
+            var parentRef: AnyObject?
+            let parentResult = AXUIElementCopyAttributeValue(
+                current,
+                kAXParentAttribute as CFString,
+                &parentRef
+            )
+            guard parentResult == .success else { break }
+            let parent = parentRef as! AXUIElement
+
+            if let text = getAXSelectedText(from: parent) {
+                return text
+            }
+            if let text = getSelectedTextViaRange(from: parent) {
+                return text
+            }
+            current = parent
+        }
+
+        // Strategy 4: Try getting selected text directly from the app element
+        if let text = getAXSelectedText(from: app) {
+            return text
+        }
+
+        lastError = nil
+        return nil
+    }
+
+    /// Get kAXSelectedTextAttribute from an element.
+    private func getAXSelectedText(from element: AXUIElement) -> String? {
+        var ref: AnyObject?
+        let result = AXUIElementCopyAttributeValue(
             element,
             kAXSelectedTextAttribute as CFString,
-            &selectedTextRef
+            &ref
         )
+        guard result == .success, let text = ref as? String else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
 
-        guard textResult == .success else {
-            // Element doesn't support selected text — normal for many UI elements
-            lastError = nil
-            return nil
-        }
+    /// Get selected text via range parameterized attribute.
+    /// Some apps (Word, Pages) support this even when kAXSelectedTextAttribute fails.
+    private func getSelectedTextViaRange(from element: AXUIElement) -> String? {
+        // First get the selected text range
+        var rangeRef: AnyObject?
+        let rangeResult = AXUIElementCopyAttributeValue(
+            element,
+            kAXSelectedTextRangeAttribute as CFString,
+            &rangeRef
+        )
+        guard rangeResult == .success, let rangeValue = rangeRef else { return nil }
 
-        guard let text = selectedTextRef as? String else {
-            lastError = nil
-            return nil
-        }
+        // Extract the CFRange
+        var range = CFRange(location: 0, length: 0)
+        guard AXValueGetValue(rangeValue as! AXValue, .cfRange, &range) else { return nil }
+        guard range.length > 0, range.length <= 30 else { return nil }
 
+        // Use the parameterized attribute to get the string for that range
+        var textRef: AnyObject?
+        let textResult = AXUIElementCopyParameterizedAttributeValue(
+            element,
+            kAXStringForRangeParameterizedAttribute as CFString,
+            rangeValue,
+            &textRef
+        )
+        guard textResult == .success, let text = textRef as? String else { return nil }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }

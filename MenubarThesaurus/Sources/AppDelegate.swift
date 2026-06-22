@@ -24,6 +24,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         set { UserDefaults.standard.set(newValue, forKey: "isEnabled") }
     }
 
+    /// Where to show the synonym panel: near cursor or below menu bar icon.
+    private var showNearCursor: Bool {
+        get { UserDefaults.standard.bool(forKey: "showNearCursor") }
+        set { UserDefaults.standard.set(newValue, forKey: "showNearCursor") }
+    }
+
     private var launchAtLogin: Bool {
         get {
             if #available(macOS 13.0, *) {
@@ -214,6 +220,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         opacityItem.submenu = opacitySubmenu
         menu.addItem(opacityItem)
 
+        // Display position submenu
+        let posItem = NSMenuItem(title: "Show Synonyms", action: nil, keyEquivalent: "")
+        let posSubmenu = NSMenu()
+
+        let menuBarPos = NSMenuItem(title: "Below Menu Bar", action: #selector(setDisplayMenuBar), keyEquivalent: "")
+        menuBarPos.target = self
+        menuBarPos.state = showNearCursor ? .off : .on
+        posSubmenu.addItem(menuBarPos)
+
+        let cursorPos = NSMenuItem(title: "Near Cursor", action: #selector(setDisplayCursor), keyEquivalent: "")
+        cursorPos.target = self
+        cursorPos.state = showNearCursor ? .on : .off
+        posSubmenu.addItem(cursorPos)
+
+        posItem.submenu = posSubmenu
+        menu.addItem(posItem)
+
         menu.addItem(NSMenuItem.separator())
 
         // Source color legend (text-only, no dots)
@@ -325,14 +348,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showSynonymDropdown(word: String, synonyms: [TaggedSynonym]) {
-        guard let button = statusItem.button,
-              let window = button.window else { return }
+        let anchorRect: NSRect
 
-        let buttonRect = window.convertToScreen(button.convert(button.bounds, to: nil))
+        if showNearCursor {
+            // Position near the mouse cursor
+            let mouseLocation = NSEvent.mouseLocation
+            // Create a small rect at the cursor position
+            anchorRect = NSRect(x: mouseLocation.x - 10, y: mouseLocation.y, width: 20, height: 20)
+        } else {
+            // Position below the menu bar icon
+            guard let button = statusItem.button,
+                  let window = button.window else { return }
+            anchorRect = window.convertToScreen(button.convert(button.bounds, to: nil))
+        }
+
         synonymPanel.show(
             word: word,
             synonyms: synonyms,
-            anchorRect: buttonRect
+            anchorRect: anchorRect,
+            nearCursor: showNearCursor
         ) { [weak self] synonym in
             self?.copyToClipboard(synonym)
         }
@@ -373,6 +407,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             synonymPanel.hide()
             statusItem.button?.alphaValue = 0.4
         }
+        rebuildMenu()
+    }
+
+    @objc private func setDisplayMenuBar() {
+        showNearCursor = false
+        rebuildMenu()
+    }
+
+    @objc private func setDisplayCursor() {
+        showNearCursor = true
         rebuildMenu()
     }
 

@@ -43,7 +43,7 @@ class SynonymPanel {
         }
     }
 
-    func show(word: String, synonyms: [TaggedSynonym], anchorRect: NSRect, onSelect: @escaping (String) -> Void) {
+    func show(word: String, synonyms: [TaggedSynonym], anchorRect: NSRect, nearCursor: Bool = false, onSelect: @escaping (String) -> Void) {
         hide()
         self.onSelect = onSelect
 
@@ -56,8 +56,29 @@ class SynonymPanel {
         let totalHeight = headerHeight + CGFloat(synonyms.count) * rowHeight
             + footerHeight + padding * 2
 
-        let x = anchorRect.midX - width / 2
-        let y = anchorRect.minY - totalHeight - 4
+        let x: CGFloat
+        let y: CGFloat
+
+        if nearCursor {
+            // Position above-right of cursor, keeping on screen
+            let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+            let candidateX = anchorRect.midX + 12
+            let candidateY = anchorRect.midY - 10
+
+            // Keep panel on screen horizontally
+            x = min(candidateX, screenFrame.maxX - width - 8)
+            // Keep panel on screen vertically; prefer showing below cursor if near top
+            if candidateY + totalHeight > screenFrame.maxY {
+                y = candidateY - totalHeight
+            } else {
+                y = candidateY
+            }
+        } else {
+            // Position below menu bar icon
+            x = anchorRect.midX - width / 2
+            y = anchorRect.minY - totalHeight - 4
+        }
+
         let frame = NSRect(x: x, y: y, width: width, height: totalHeight)
 
         let p = NSPanel(
