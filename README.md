@@ -12,7 +12,7 @@ A lightweight macOS menu bar app that instantly shows synonyms when you select a
 
 ```bash
 # Build the app
-cd ~/Claude/Projects/Menubar_thesaurus
+cd ${Menubar_thesaurus directory}
 bash build.sh
 
 # Install to Applications (recommended for Launch at Login)
